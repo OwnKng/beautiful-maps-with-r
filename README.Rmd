@@ -1,0 +1,112 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+
+```
+
+```{r}
+green_space <- read_sf("Greenspace", "GB_GreenspaceSite")
+green_space <- green_space %>% st_transform(crs = 4326)
+
+```
+
+```{r}
+stations <- xml2::read_html("https://www.doogal.co.uk/london_stations.php") %>% 
+  rvest::html_table() 
+
+stations <- stations[[1]] %>% 
+  janitor::clean_names() %>% 
+  select(station, latitude, longitude)
+
+```
+
+```{r}
+stations <- stations %>% st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
+
+stations <- stations %>% st_transform(crs = 29902) %>% st_buffer(1000)
+stations <- stations %>% st_transform(crs = 4326)
+
+stations$area <- stations %>% st_area()
+stations$area <- units::set_units(stations$area, km^2)
+
+stations[sample(nrow(stations), 10),] %>% 
+  ggplot() +
+  geom_sf()
+
+```
+
+```{r}
+stations_green_space <- st_intersection(green_space, stations)
+
+stations_green_space$area <- stations_green_space %>% st_area()
+
+green_space_per_station <- stations_green_space %>% 
+  group_by(station) %>% 
+  summarise(total_area = sum(area))
+
+green_space_per_station$total_area <- units::set_units(green_space_per_station$total_area, km^2)
+
+green_space_per_station %>% arrange(desc(total_area)) 
+
+
+```
+
+```{r}
+
+stations_green_space %>% 
+  filter(station == "Richmond") %>% 
+  ggplot() + 
+  geom_sf(col = "white", fill = "green") + 
+  geom_sf(data = filter(stations, station == "Richmond"), fill = NA)
+
+richmond_green_space <- stations_green_space %>% filter(station == "Richmond")
+richmond_buffer <- stations %>% filter(station == "Richmond")
+```
+
+```{r}
+library(osmplotr)
+library(osmdata)
+
+bbox <- st_bbox(richmond_buffer)
+
+roads <- bbox %>% 
+  opq() %>% 
+  add_osm_feature("highway") %>% 
+  osmdata_sf()
+
+roads_lines <- roads$osm_lines
+roads_lines <- st_transform(roads_lines, crs = 4326)
+roads_lines <- st_intersection(richmond_buffer, roads_lines)
+
+trainline <- bbox %>% 
+  opq() %>% 
+  add_osm_feature("railway") %>% 
+  osmdata_sf()
+
+trainline <- trainline$osm_lines
+trainline <- st_transform(trainline, crs = 4326)
+trainline <- st_intersection(richmond_buffer, trainline)
+
+```
+
+```{r}
+
+ggplot() + 
+  geom_sf(data = richmond_green_space, col = "white", fill = "#BEF165") + 
+  geom_sf(data = richmond_buffer, col = "white", fill = NA) + 
+  geom_sf(data = roads_lines, col = "#B1B2B4") + 
+  geom_sf(data = trainline, col = "#DBD6C7") + 
+  geom_sf(data = st_centroid(richmond_buffer), col = "skyblue", size = 3) + 
+  theme_void() +
+  theme(
+    text = element_text(color = "#FFFFFF"), 
+    plot.background = element_rect(fill = "#121212")
+    ) + 
+  labs(x = "", y = "", title = "Green spaces around Richmond station")
+
+```
