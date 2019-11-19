@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Beautiful maps with ggplot and sf"
 output: html_document
 ---
 
@@ -110,3 +110,78 @@ ggplot() +
   labs(x = "", y = "", title = "Green spaces around Richmond station")
 
 ```
+
+
+```{r}
+noise_roads <- read_sf("Noise", "Road_LAeq_16h_London") %>% rename("road_noise_class" = 1)
+noise_roads <- noise_roads %>% st_transform(crs = 4326)
+
+stations_sample <- stations[sample(nrow(stations), 50),]
+
+stations_noise_road <- st_intersection(stations_sample, noise_roads)
+
+stations_noise_road$noise_area <- st_area(stations_noise_road)
+
+stations_noise_road$noise_area <- units::set_units(stations_noise_road$noise_area, km^2)
+
+stations_noise_road <- stations_noise_road %>% 
+  as.data.frame() %>% 
+  select(-geometry) %>% 
+  mutate_at(vars("area", "noise_area"), as.numeric) %>% 
+  group_by(station) %>% 
+  mutate(noise_area = sum(noise_area)) %>% 
+  distinct(station, area, noise_area) %>% 
+  mutate(area_noise = noise_area/area)
+
+stations_noise_road %>% 
+  arrange(desc(area_noise))
+
+```
+
+
+```{r}
+
+southwark_station <- filter(stations, station == "Southwark")
+southwark_noise <- st_intersection(southwark_station, noise_roads)
+
+bbox <- st_bbox(southwark_station)
+
+roads <- bbox %>% 
+  opq() %>% 
+  add_osm_feature("highway") %>% 
+  osmdata_sf()
+
+roads_lines <- roads$osm_lines
+roads_lines <- st_transform(roads_lines, crs = 4326)
+roads_lines <- st_intersection(southwark_station, roads_lines)
+
+water <- bbox %>% 
+  opq() %>% 
+  add_osm_feature("water") %>% 
+  osmdata_sf()
+
+water <- water$osm_multipolygons
+water <- st_transform(water, crs = 4326)
+water <- st_intersection(southwark_station, water)
+
+southwark_noise$road_noise_class <- fct_inorder(southwark_noise$road_noise_class)
+
+ggplot() + 
+  geom_sf(data = southwark_noise, aes(fill = road_noise_class), col = NA) + 
+  geom_sf(data = water, col = "#B1B2B4", fill = "#9CCCF5") + 
+  geom_sf(data = southwark_station, col = "white", fill = NA) + 
+  geom_sf(data = roads_lines, col = "#B1B2B4") + 
+  geom_sf(data = st_centroid(southwark_station), 
+          col = "skyblue", size = 3) + 
+  scale_fill_brewer(palette = "Reds", name = "Noise Levels (dB)") + 
+  theme_void() +
+  theme(
+    text = element_text(color = "#FFFFFF"), 
+    plot.background = element_rect(fill = "#121212"),
+    legend.position = "bottom"
+    ) + 
+  labs(x = "", y = "", title = "Levels of road noise around Southwark station")
+
+```
+
+
